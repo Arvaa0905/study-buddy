@@ -85,10 +85,11 @@
   const resetBtn = document.getElementById('paper-reset-btn');
   if (stage) {
     const labels = { flat: 'Flat', holding: 'Holding…', crumpled: 'Crumpled', creased: 'Creased' };
+    const isCompact = window.innerWidth <= 520;
     const instance = mountPaperCrumple(stage, {
-      sceneHeight: 420,
-      width: 280,
-      height: 350,
+      sceneHeight: isCompact ? 320 : 420,
+      width: isCompact ? 230 : 280,
+      height: isCompact ? 285 : 350,
       releaseBehavior: 'creased',
       creaseStrength: 0.22,
       onStateChange: (next) => {
