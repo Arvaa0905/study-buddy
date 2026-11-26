@@ -2,6 +2,7 @@
 {% block content %}<div class="auth-shell"><div class="auth-brand"><span class="brand-icon">✦</span> Study Buddy</div><div class="auth-card">
 <div class="eyebrow">YOUR PERSONAL LEARNING SPACE</div><h1>{{ 'Create your account' if mode=='signup' else 'Welcome back' }}</h1><p class="muted">{{ 'Build better study habits, one session at a time.' if mode=='signup' else 'Pick up where your learning left off.' }}</p>
 <form method="post" class="form-stack">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 {% if mode=='signup' %}<label>Full name<input name="name" placeholder="Your name" required maxlength="80" autocomplete="name"></label>{% endif %}
 <label>Email address<input type="email" name="email" placeholder="you@example.com" required autocomplete="email"></label>
 <label>Password<input type="password" name="password" placeholder="{{ 'At least 8 characters' if mode=='signup' else 'Your password' }}" minlength="{{ 8 if mode=='signup' else 1 }}" required autocomplete="{{ 'new-password' if mode=='signup' else 'current-password' }}"></label>

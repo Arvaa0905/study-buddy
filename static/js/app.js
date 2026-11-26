@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
   document.querySelectorAll('[data-confirm]').forEach(b => b.addEventListener('click', e => {
     if (!confirm(b.dataset.confirm)) e.preventDefault();
   }));
@@ -54,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const pending=addMessage('assistant','',true);
       const button=chatForm.querySelector('button'); button.disabled=true;
       try {
-        const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});
+        const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({message:text})});
         const data=await response.json(); pending.classList.remove('thinking-state'); pending.innerHTML=''; renderMarkdown(pending,data.answer||data.error||'Something went wrong.');
       } catch(e){pending.classList.remove('thinking-state'); pending.textContent='Could not connect. Please check your connection and try again.';}
       finally {button.disabled=false; scrollBottom(); input.focus();}
@@ -98,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if(answers[index]===null){alert('Choose an answer before finishing.');return;}
       const btn=document.getElementById('submit-quiz');btn.disabled=true;
       try{
-        const r=await fetch('/api/quiz/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,answers})});
+        const r=await fetch('/api/quiz/submit',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({topic,answers})});
         const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not save result');
         stage.hidden=true;result.hidden=false;document.getElementById('result-title').textContent=d.percent>=80?'Excellent work!':d.percent>=60?'Good progress!':'Keep going — you’ve got this!';
         document.getElementById('result-score').textContent=`${d.score}/${d.total}`;

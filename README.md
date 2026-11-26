@@ -44,10 +44,31 @@ A full-stack student study portal based on the supplied synopsis: secure account
 - Quiz result history
 - JSON APIs under `/api`; health check at `/health`
 
+## Run with Docker (recommended for production)
+1. Copy `.env.example` to `.env` and set strong values for `SECRET_KEY`, `MYSQL_PASSWORD`, and `MYSQL_ROOT_PASSWORD`:
+   ```powershell
+   Copy-Item .env.example .env
+   python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+2. Build and start the MySQL database and Gunicorn web service:
+   ```powershell
+   docker compose up -d --build
+   ```
+3. Optional: include the Nginx reverse proxy (`http://localhost`):
+   ```powershell
+   docker compose --profile proxy up -d --build
+   ```
+4. Check status and health:
+   ```powershell
+   docker compose ps
+   ```
+   Open `http://127.0.0.1:5000` (or `http://localhost` with the `proxy` profile).
+
 ## Security and production notes
 - Passwords are hashed; database queries are ORM parameterized; notes/results are scoped to the logged-in user.
-- Set a strong random `SECRET_KEY`, keep `.env` private, and use HTTPS in production.
-- For production, configure a managed MySQL database, disable debug mode, add CSRF protection/rate limits and configure secure cookie settings behind HTTPS.
+- CSRF protection (`X-CSRFToken` / form `csrf_token`), security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Strict-Transport-Security` over HTTPS), `ProxyFix`, and per-IP rate limiting on `/login`, `/signup`, and `/api/chat` are built in.
+- In production (`APP_ENV=production`), `SECRET_KEY` must be set to a non-default random value.
+- Set `SESSION_COOKIE_SECURE=1` when serving behind HTTPS.
 - AI calls may incur provider charges. Never put API keys in frontend JavaScript.
 
 

@@ -1,17 +1,56 @@
-import os, re, json, random
-from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+import os, re, json, random, hmac, secrets, logging, time, threading
+from collections import defaultdict
+from datetime import datetime, timedelta
 from functools import wraps
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, abort
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
+
+_WEAK_SECRETS = {
+    "",
+    "change-this-secret-before-deploying",
+    "replace-with-a-long-random-secret",
+}
+_app_env = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower()
+_secret_key = os.getenv("SECRET_KEY", "change-this-secret-before-deploying")
+if _app_env == "production" and _secret_key in _WEAK_SECRETS:
+    raise RuntimeError("SECRET_KEY must be set to a strong random value when APP_ENV=production.")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-this-secret-before-deploying")
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+if _secret_key in _WEAK_SECRETS:
+    app.logger.warning("Using default SECRET_KEY; set a strong random SECRET_KEY before deploying.")
+
+app.config["SECRET_KEY"] = _secret_key
 db_url = os.getenv("DATABASE_URL", "sqlite:///studybuddy.db")
 if db_url.startswith("mysql://"):
     db_url = db_url.replace("mysql://", "mysql+pymysql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+if not db_url.startswith("sqlite"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "280")),
+    }
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.getenv("SESSION_LIFETIME_DAYS", "7")))
+app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", str(1024 * 1024)))
+app.config["CSRF_ENABLED"] = os.getenv("CSRF_ENABLED", "1") == "1"
+app.config["RATELIMIT_ENABLED"] = os.getenv("RATELIMIT_ENABLED", "1") == "1"
+
+if os.getenv("TRUST_PROXY", "1") == "1":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 db = SQLAlchemy(app)
 
 class User(db.Model):
@@ -44,6 +83,66 @@ class QuizResult(db.Model):
     total = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+_rate_lock = threading.Lock()
+_rate_buckets = defaultdict(list)
+
+def get_csrf_token():
+    """Return the per-session CSRF token, creating one if needed."""
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+@app.context_processor
+def inject_security_context():
+    return {"csrf_token": get_csrf_token}
+
+@app.before_request
+def verify_csrf():
+    if not app.config.get("CSRF_ENABLED", True):
+        return
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        expected = session.get("_csrf_token")
+        provided = request.headers.get("X-CSRFToken") or request.form.get("csrf_token") or ""
+        if not expected or not hmac.compare_digest(str(expected), str(provided)):
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Invalid or missing CSRF token."}), 400
+            abort(400, description="Invalid or missing CSRF token.")
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.is_secure:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+def rate_limit(max_requests, window_seconds, methods=("POST",)):
+    """Simple sliding-window per-IP rate limiter for sensitive endpoints."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            if app.config.get("RATELIMIT_ENABLED", True) and request.method in methods:
+                now = time.monotonic()
+                client_ip = (request.remote_addr or "unknown").split(",")[0].strip()
+                key = (request.endpoint or fn.__name__, client_ip)
+                with _rate_lock:
+                    recent = [t for t in _rate_buckets[key] if now - t < window_seconds]
+                    if len(recent) >= max_requests:
+                        _rate_buckets[key] = recent
+                        if request.path.startswith("/api/"):
+                            return jsonify({"error": "Too many requests. Please wait a moment and try again."}), 429
+                        flash("Too many attempts. Please wait a moment and try again.", "error")
+                        return render_template("auth.html", mode="signup" if request.endpoint == "signup" else "login"), 429
+                    recent.append(now)
+                    _rate_buckets[key] = recent
+            return fn(*args, **kwargs)
+        return wrapped
+    return decorator
+
 def login_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -62,6 +161,7 @@ def index():
     return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
 
 @app.route("/signup", methods=["GET","POST"])
+@rate_limit(10, 60)
 def signup():
     if request.method == "POST":
         name = request.form.get("name","").strip()
@@ -80,6 +180,7 @@ def signup():
     return render_template("auth.html", mode="signup")
 
 @app.route("/login", methods=["GET","POST"])
+@rate_limit(15, 60)
 def login():
     if request.method == "POST":
         email = request.form.get("email","").strip().lower()
@@ -196,6 +297,7 @@ def ai_answer(question):
 
 @app.route("/api/chat", methods=["POST"])
 @login_required
+@rate_limit(30, 60)
 def api_chat():
     data = request.get_json(silent=True) or {}
     question = str(data.get("message","")).strip()
@@ -264,10 +366,40 @@ def history():
 
 @app.route("/health")
 def health():
-    return jsonify({"status":"ok","app":"Study Buddy"})
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok", "app": "Study Buddy", "database": "ok"})
+    except Exception:
+        app.logger.exception("Health check failed")
+        return jsonify({"status": "error", "app": "Study Buddy", "database": "unavailable"}), 503
 
-with app.app_context():
-    db.create_all()
+@app.errorhandler(400)
+@app.errorhandler(404)
+@app.errorhandler(429)
+@app.errorhandler(500)
+def handle_error(err):
+    code = getattr(err, "code", 500)
+    if code >= 500:
+        app.logger.exception("Unhandled server error")
+    if request.path.startswith("/api/"):
+        msg = err.description if code < 500 else "Internal server error."
+        return jsonify({"error": msg}), code
+    return render_template("auth.html", mode="login") if code == 401 else (
+        f"<h1>{code}</h1><p>{err.description if code < 500 else 'Something went wrong. Please try again.'}</p>",
+        code,
+    )
+
+def init_db():
+    """Create database tables within an application context."""
+    with app.app_context():
+        db.create_all()
+
+if os.getenv("AUTO_CREATE_TABLES", "1") == "1":
+    init_db()
 
 if __name__ == "__main__":
-    app.run(debug=os.getenv("FLASK_DEBUG","0") == "1", port=int(os.getenv("PORT","5000")))
+    app.run(
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "5000")),
+        debug=os.getenv("FLASK_DEBUG", "0") == "1",
+    )

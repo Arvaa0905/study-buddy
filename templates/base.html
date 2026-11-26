@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{% block title %}Study Buddy{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static',filename='css/style.css') }}">
 <script defer src="{{ url_for('static',filename='js/app.js') }}"></script></head>
 <body>
@@ -11,7 +12,7 @@
 <a class="nav-link {% if request.endpoint=='notes' %}active{% endif %}" href="{{ url_for('notes') }}">▤ <span>My Notes</span></a>
 <a class="nav-link {% if request.endpoint=='quiz' %}active{% endif %}" href="{{ url_for('quiz') }}">✓ <span>Practice Quiz</span></a>
 <a class="nav-link {% if request.endpoint=='history' %}active{% endif %}" href="{{ url_for('history') }}">◷ <span>Quiz History</span></a>
-<div class="sidebar-bottom"><div class="avatar">{{ user.name[0]|upper if user else 'S' }}</div><div class="profile"><b>{{ user.name if user else 'Student' }}</b><small>Student account</small></div><form action="{{ url_for('logout') }}" method="post"><button class="icon-button" title="Log out" aria-label="Log out">↪</button></form></div></aside>
+<div class="sidebar-bottom"><div class="avatar">{{ user.name[0]|upper if user else 'S' }}</div><div class="profile"><b>{{ user.name if user else 'Student' }}</b><small>Student account</small></div><form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-button" title="Log out" aria-label="Log out">↪</button></form></div></aside>
 {% endif %}
 <main class="{% if session.get('user_id') %}main-content{% else %}auth-main{% endif %}">
 {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-wrap">{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
