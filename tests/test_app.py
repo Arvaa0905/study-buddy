@@ -2,6 +2,7 @@ import os
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Configure isolated test environment before importing app
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -99,6 +100,71 @@ class StudyBuddyTestCase(unittest.TestCase):
         )
         self.assertEqual(submit_res.status_code, 200)
         self.assertEqual(submit_res.get_json()["score"], 5)
+
+    def test_custom_quiz_generation_and_chat_topic_detection(self):
+        res = self._signup(name="Bob", email="bob@example.com")
+        self.assertEqual(res.status_code, 200)
+        quiz_page = self.client.get("/quiz")
+        token = self._get_csrf(quiz_page.get_data(as_text=True))
+
+        # Chat detects quiz request and returns quiz_topic
+        chat_res = self.client.post(
+            "/api/chat",
+            json={"message": "Quiz me on Photosynthesis"},
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(chat_res.status_code, 200)
+        self.assertEqual(chat_res.get_json().get("quiz_topic"), "Photosynthesis")
+
+        # Without GEMINI_API_KEY, custom non-preset topic returns 503
+        missing_key_res = self.client.post(
+            "/api/quiz/generate",
+            json={"topic": "Photosynthesis"},
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(missing_key_res.status_code, 503)
+
+        # With generated questions (mocked Gemini output), generate + submit works end-to-end
+        mock_questions = [
+            {
+                "q": "Where does photosynthesis occur?",
+                "options": ["Nucleus", "Chloroplast", "Mitochondria", "Ribosome"],
+                "answer": 1,
+                "why": "Chloroplasts contain chlorophyll for photosynthesis.",
+            },
+            {
+                "q": "Which gas is absorbed by plants during photosynthesis?",
+                "options": ["Oxygen", "Nitrogen", "Carbon dioxide", "Hydrogen"],
+                "answer": 2,
+                "why": "Plants take in carbon dioxide to produce glucose.",
+            },
+            {
+                "q": "What is the main sugar produced?",
+                "options": ["Glucose", "Lactose", "Sucrose", "Maltose"],
+                "answer": 0,
+                "why": "Photosynthesis produces glucose.",
+            },
+        ]
+        with patch.object(sb, "generate_custom_quiz", return_value=mock_questions):
+            gen_res = self.client.post(
+                "/api/quiz/generate",
+                json={"topic": "Photosynthesis", "difficulty": "easy", "num_questions": 3},
+                headers={"X-CSRFToken": token},
+            )
+            self.assertEqual(gen_res.status_code, 200)
+            gen_data = gen_res.get_json()
+            self.assertEqual(gen_data["topic"], "Photosynthesis")
+            self.assertEqual(len(gen_data["questions"]), 3)
+            self.assertNotIn("answer", gen_data["questions"][0])
+
+        submit_res = self.client.post(
+            "/api/quiz/submit",
+            json={"topic": "Photosynthesis", "answers": [1, 2, 0]},
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(submit_res.status_code, 200)
+        self.assertEqual(submit_res.get_json()["score"], 3)
+        self.assertEqual(submit_res.get_json()["percent"], 100)
 
 
 if __name__ == "__main__":

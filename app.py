@@ -295,6 +295,20 @@ def ai_answer(question):
         return ("## I couldn't reach Gemini just now\n\n"
                 "Check `GEMINI_API_KEY`, `GEMINI_MODEL`, your network connection, and API quota, then try again.")
 
+def extract_quiz_topic(message):
+    """Detect if a chat message requests a quiz on a specific topic."""
+    patterns = (
+        r"(?:make|create|generate|build|give\s+me|start)\s+(?:a\s+)?(?:custom\s+)?quiz\s+(?:on|about|for)\s+(.+)",
+        r"quiz\s+me\s+(?:on|about)\s+(.+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, message.strip(), re.IGNORECASE)
+        if match:
+            topic = re.sub(r"[?.!]+$", "", match.group(1)).strip()
+            if topic:
+                return topic[:120]
+    return None
+
 @app.route("/api/chat", methods=["POST"])
 @login_required
 @rate_limit(30, 60)
@@ -304,11 +318,15 @@ def api_chat():
     if not question: return jsonify({"error":"Please enter a question."}), 400
     if len(question) > 5000: return jsonify({"error":"Question is too long (maximum 5,000 characters)."}), 400
     uid = session["user_id"]
+    quiz_topic = extract_quiz_topic(question)
     answer = ai_answer(question)
     db.session.add(ChatMessage(user_id=uid, role="user", content=question))
     db.session.add(ChatMessage(user_id=uid, role="assistant", content=answer))
     db.session.commit()
-    return jsonify({"answer":answer})
+    payload = {"answer": answer}
+    if quiz_topic:
+        payload["quiz_topic"] = quiz_topic
+    return jsonify(payload)
 
 QUIZZES = {
  "Python":[
@@ -330,10 +348,105 @@ QUIZZES = {
   {"q":"What is the basic unit of life?","options":["Organ","Tissue","Cell","Atom"],"answer":2,"why":"The cell is the basic structural and functional unit of life."},
   {"q":"Plants make food mainly through?","options":["Respiration","Photosynthesis","Fermentation","Digestion"],"answer":1,"why":"Photosynthesis converts light energy into chemical energy."}]
 }
+def generate_custom_quiz(topic, num_questions=5, difficulty="medium"):
+    """Generate a custom multiple-choice quiz on any topic using Gemini."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        for preset_topic, preset_qs in QUIZZES.items():
+            if preset_topic.lower() == topic.lower():
+                return preset_qs
+        raise ValueError(
+            "Custom AI quizzes require GEMINI_API_KEY in your .env file "
+            "(or choose Python, Computer Science, or Biology in demo mode)."
+        )
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        f"Create a {difficulty} difficulty multiple-choice quiz with exactly {num_questions} questions "
+        f"about: {topic}.\n"
+        "Return a JSON array of objects. Each object MUST have:\n"
+        '- "q": concise question string\n'
+        '- "options": array of exactly 4 distinct answer strings\n'
+        '- "answer": integer index (0, 1, 2, or 3) of the correct option\n'
+        '- "why": short 1-sentence explanation of why the answer is correct'
+    )
+    response = client.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.4,
+            max_output_tokens=2000,
+        ),
+    )
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list) or not parsed:
+        raise RuntimeError("Gemini did not return a valid question list.")
+
+    cleaned = []
+    for item in parsed[:num_questions]:
+        if not isinstance(item, dict):
+            continue
+        q_text = str(item.get("q", "")).strip()
+        options = item.get("options")
+        ans = item.get("answer")
+        why = str(item.get("why", "")).strip() or "Review this concept to reinforce your understanding."
+        if (
+            q_text
+            and isinstance(options, list)
+            and len(options) == 4
+            and isinstance(ans, int)
+            and 0 <= ans < 4
+        ):
+            cleaned.append({
+                "q": q_text[:300],
+                "options": [str(opt).strip()[:160] for opt in options],
+                "answer": ans,
+                "why": why[:300],
+            })
+    if not cleaned:
+        raise RuntimeError("Generated quiz questions were invalid.")
+    return cleaned
+
 @app.route("/quiz")
 @login_required
 def quiz():
     return render_template("quiz.html", user=current_user(), topics=list(QUIZZES.keys()))
+
+@app.route("/api/quiz/generate", methods=["POST"])
+@login_required
+@rate_limit(20, 60)
+def quiz_generate():
+    data = request.get_json(silent=True) or {}
+    topic = str(data.get("topic", "")).strip()[:120]
+    if not topic:
+        return jsonify({"error": "Please enter a quiz topic."}), 400
+    difficulty = str(data.get("difficulty", "medium")).strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+    try:
+        num_questions = int(data.get("num_questions", 5))
+    except (TypeError, ValueError):
+        num_questions = 5
+    num_questions = max(3, min(num_questions, 10))
+
+    try:
+        questions = generate_custom_quiz(topic, num_questions=num_questions, difficulty=difficulty)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        app.logger.exception("Custom quiz generation failed")
+        return jsonify({"error": "Could not generate quiz right now. Please try again."}), 502
+
+    session["active_quiz"] = {"topic": topic, "questions": questions}
+    public_questions = [{"q": q["q"], "options": q["options"]} for q in questions]
+    return jsonify({"topic": topic, "questions": public_questions})
 
 @app.route("/api/quiz/<topic>")
 @login_required
@@ -346,10 +459,17 @@ def quiz_questions(topic):
 @login_required
 def quiz_submit():
     data = request.get_json(silent=True) or {}
-    topic = data.get("topic")
+    topic = str(data.get("topic") or "").strip()
     answers = data.get("answers",[])
-    if topic not in QUIZZES or not isinstance(answers,list): return jsonify({"error":"Invalid quiz submission."}), 400
-    qs = QUIZZES[topic]
+    active = session.get("active_quiz")
+    if isinstance(active, dict) and active.get("topic") == topic and isinstance(active.get("questions"), list):
+        qs = active["questions"]
+    elif topic in QUIZZES:
+        qs = QUIZZES[topic]
+    else:
+        return jsonify({"error":"Invalid quiz submission."}), 400
+    if not isinstance(answers, list):
+        return jsonify({"error":"Invalid quiz submission."}), 400
     score = sum(1 for i,q in enumerate(qs) if i < len(answers) and answers[i] == q["answer"])
     result = QuizResult(user_id=session["user_id"], topic=topic, score=score, total=len(qs))
     db.session.add(result); db.session.commit()

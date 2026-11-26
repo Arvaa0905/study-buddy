@@ -57,6 +57,13 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({message:text})});
         const data=await response.json(); pending.classList.remove('thinking-state'); pending.innerHTML=''; renderMarkdown(pending,data.answer||data.error||'Something went wrong.');
+        if (data.quiz_topic) {
+          const launch=document.createElement('a');
+          launch.className='btn btn-primary quiz-launch-btn';
+          launch.href='/quiz?topic='+encodeURIComponent(data.quiz_topic);
+          launch.textContent=`Start custom quiz on ${data.quiz_topic} →`;
+          pending.parentElement.append(launch);
+        }
       } catch(e){pending.classList.remove('thinking-state'); pending.textContent='Could not connect. Please check your connection and try again.';}
       finally {button.disabled=false; scrollBottom(); input.focus();}
     }
@@ -79,9 +86,47 @@ document.addEventListener('DOMContentLoaded', () => {
     async function start(t){
       const r=await fetch('/api/quiz/'+encodeURIComponent(t)); const data=await r.json();
       if(!r.ok){alert(data.error||'Could not load quiz');return;}
-      topic=t;questions=data.questions;answers=Array(questions.length).fill(null);index=0;
+      beginQuiz(data.topic||t, data.questions);
+    }
+    function beginQuiz(t, qs){
+      topic=t;questions=qs;answers=Array(questions.length).fill(null);index=0;
       picker.hidden=true;result.hidden=true;stage.hidden=false;
       document.getElementById('quiz-topic').textContent=topic;renderQuestion();
+    }
+    const customForm=document.getElementById('custom-quiz-form');
+    if(customForm){
+      const topicInput=document.getElementById('custom-topic'),
+        diffInput=document.getElementById('custom-difficulty'),
+        countInput=document.getElementById('custom-count'),
+        genBtn=document.getElementById('generate-quiz-btn'),
+        statusEl=document.getElementById('quiz-gen-status');
+      async function generateCustomQuiz(reqTopic){
+        const cleanTopic=(reqTopic||'').trim();
+        if(!cleanTopic){topicInput.focus();return;}
+        genBtn.disabled=true; genBtn.textContent='Generating quiz…';
+        statusEl.hidden=false; statusEl.textContent=`Creating a ${countInput.value}-question ${diffInput.value} quiz on "${cleanTopic}"…`;
+        try{
+          const r=await fetch('/api/quiz/generate',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
+            body:JSON.stringify({topic:cleanTopic,difficulty:diffInput.value,num_questions:Number(countInput.value)})
+          });
+          const data=await r.json();
+          if(!r.ok){statusEl.textContent=data.error||'Could not generate quiz.';return;}
+          statusEl.hidden=true;
+          beginQuiz(data.topic, data.questions);
+        }catch(_){
+          statusEl.textContent='Could not connect to generate quiz. Please try again.';
+        }finally{
+          genBtn.disabled=false; genBtn.textContent='Generate quiz ✦';
+        }
+      }
+      customForm.addEventListener('submit',e=>{e.preventDefault();generateCustomQuiz(topicInput.value);});
+      const requestedTopic=new URLSearchParams(window.location.search).get('topic');
+      if(requestedTopic && requestedTopic.trim()){
+        topicInput.value=requestedTopic.trim();
+        generateCustomQuiz(requestedTopic.trim());
+      }
     }
     function renderQuestion(){
       const q=questions[index];document.getElementById('question-count').textContent=`QUESTION ${index+1} OF ${questions.length}`;
