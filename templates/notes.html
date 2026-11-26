@@ -1,7 +1,49 @@
 {% extends "base.html" %}{% block title %}My Notes · Study Buddy{% endblock %}{% block content %}
-<header class="page-header"><div><span class="eyebrow">YOUR KNOWLEDGE BASE</span><h1>My notes <span class="count-chip">{{ notes|length }}</span></h1><p class="muted">Capture the things you want to remember.</p></div><button class="btn btn-primary" id="new-note">＋ New note</button></header>
-<div class="notes-layout"><section class="panel notes-list-panel"><form class="searchbar" method="get"><span>⌕</span><input name="q" value="{{ q }}" placeholder="Search notes, subjects, content…"><button aria-label="Search">→</button></form>
-<div class="note-list">{% for n in notes %}<button class="note-list-item" data-note-id="{{ n.id }}" data-title="{{ n.title|e }}" data-subject="{{ n.subject|e }}" data-content="{{ n.content|e }}"><span class="note-mark">▤</span><span><b>{{ n.title }}</b><small>{{ n.subject }} · {{ n.updated_at.strftime('%d %b %Y') }}</small><small class="preview">{{ n.content[:76] }}{% if n.content|length>76 %}…{% endif %}</small></span><span class="row-arrow">›</span></button>{% else %}<div class="empty-state"><div>▤</div><b>No notes found</b><p>{% if q %}Try a different search term.{% else %}Create a note to begin your personal library.{% endif %}</p></div>{% endfor %}</div></section>
-<section class="panel editor-panel"><form method="post" action="{{ url_for('save_note') }}" id="note-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="editor-top"><span class="pill" id="editor-label">NEW NOTE</span><span class="muted small">Autosave not enabled</span></div><input type="hidden" name="id" id="note-id"><label class="sr-only" for="note-title">Note title</label><input class="title-input" id="note-title" name="title" placeholder="Give your note a title…" maxlength="180" required><label class="sr-only" for="note-subject">Subject</label><input class="subject-input" id="note-subject" name="subject" placeholder="Subject (e.g. Biology)" maxlength="100"><div class="editor-divider"></div><label class="sr-only" for="note-content">Note content</label><textarea id="note-content" name="content" placeholder="Start writing your thoughts here…&#10;&#10;You can include definitions, examples, questions, or anything you want to remember." required></textarea><div class="editor-footer"><span class="muted small" id="char-count">0 characters</span><div class="button-row"><button class="btn btn-ghost" type="button" id="clear-note">Clear</button><button class="btn btn-primary" type="submit">Save note <span>→</span></button></div></div></form>
-<div id="delete-wrap" class="delete-wrap" hidden><form method="post" id="delete-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger" type="submit" data-confirm="Delete this note permanently?">Delete note</button></form></div></section></div>
+<header class="page-header">
+    <div><span class="eyebrow">YOUR KNOWLEDGE BASE</span>
+        <h1>My notes <span class="count-chip">{{ notes|length }}</span></h1>
+        <p class="muted">Capture the things you want to remember.</p>
+    </div><button class="btn btn-primary" id="new-note">＋ New note</button>
+</header>
+<div class="notes-layout">
+    <section class="panel notes-list-panel">
+        <form class="searchbar" method="get"><span>⌕</span><input name="q" value="{{ q }}"
+                placeholder="Search notes, subjects, content…"><button aria-label="Search">→</button></form>
+        <div class="note-list" data-animated-list>{% for n in notes %}<button class="note-list-item"
+                data-note-id="{{ n.id }}" data-title="{{ n.title|e }}" data-subject="{{ n.subject|e }}"
+                data-content="{{ n.content|e }}"><span class="note-mark">▤</span><span><b>{{ n.title }}</b><small>{{
+                        n.subject }} · {{ n.updated_at.strftime('%d %b %Y') }}</small><small class="preview">{{
+                        n.content[:76] }}{% if n.content|length>76 %}…{% endif %}</small></span><span
+                    class="row-arrow">›</span></button>{% else %}<div class="empty-state">
+                <div>▤</div><b>No notes found</b>
+                <p>{% if q %}Try a different search term.{% else %}Create a note to begin your personal library.{% endif
+                    %}</p>
+            </div>{% endfor %}</div>
+    </section>
+    <section class="panel editor-panel">
+        <form method="post" action="{{ url_for('save_note') }}" id="note-form"><input type="hidden" name="csrf_token"
+                value="{{ csrf_token() }}">
+            <div class="editor-top"><span class="pill" id="editor-label">NEW NOTE</span><span
+                    class="muted small">Autosave not enabled</span></div><input type="hidden" name="id"
+                id="note-id"><label class="sr-only" for="note-title">Note title</label><input class="title-input"
+                id="note-title" name="title" placeholder="Give your note a title…" maxlength="180" required><label
+                class="sr-only" for="note-subject">Subject</label><input class="subject-input" id="note-subject"
+                name="subject" placeholder="Subject (e.g. Biology)" maxlength="100">
+            <div class="editor-divider"></div><label class="sr-only" for="note-content">Note content</label><textarea
+                id="note-content" name="content"
+                placeholder="Start writing your thoughts here…&#10;&#10;You can include definitions, examples, questions, or anything you want to remember."
+                required></textarea>
+            <div class="editor-footer"><span class="muted small" id="char-count">0 characters</span>
+                <div class="button-row"><button class="btn btn-ghost" type="button"
+                        id="clear-note">Clear</button><button class="btn btn-primary" type="submit">Save note
+                        <span>→</span></button></div>
+            </div>
+        </form>
+        <div id="delete-wrap" class="delete-wrap" hidden>
+            <form method="post" id="delete-form"><input type="hidden" name="csrf_token"
+                    value="{{ csrf_token() }}"><button class="btn btn-danger" type="submit"
+                    data-confirm="Delete this note permanently?">Delete note</button></form>
+        </div>
+    </section>
+</div>
 {% endblock %}

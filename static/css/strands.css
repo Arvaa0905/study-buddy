@@ -1,0 +1,38 @@
+.strands-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.strands-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.thinking-orb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.thinking-orb {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .thinking-orb-wrap {
+    gap: 10px;
+  }
+  .thinking-orb {
+    width: 34px;
+    height: 34px;
+  }
+}
+

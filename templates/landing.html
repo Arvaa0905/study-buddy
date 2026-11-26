@@ -2,6 +2,7 @@
 {% block title %}Study Buddy — A calmer way to learn{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/paper-crumple.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/falling-text.css') }}">
 <div class="landing-page">
   <header class="landing-nav">
     <a class="brand" href="{{ url_for('index') }}"><span class="brand-icon">✦</span> Study Buddy</a>
@@ -69,6 +70,14 @@
     </div>
   </section>
 
+  <section class="falling-text-card">
+    <div class="falling-text-head">
+      <span class="pill">HOVER OR TAP TO SCATTER</span>
+      <span class="muted small">Snaps back into place automatically</span>
+    </div>
+    <div id="falling-text-stage" class="falling-text-stage"></div>
+  </section>
+
   <footer class="landing-footer">
     <span class="muted small">Study Buddy · A calmer way to learn.</span>
     <div class="landing-footer-links">
@@ -80,6 +89,7 @@
 
 <script type="module">
   import { mountPaperCrumple } from "{{ url_for('static', filename='js/paper-crumple.js') }}";
+  import { mountFallingText } from "{{ url_for('static', filename='js/falling-text.js') }}";
   const stage = document.getElementById('paper-crumple-stage');
   const statePill = document.getElementById('paper-state-pill');
   const resetBtn = document.getElementById('paper-reset-btn');
@@ -97,6 +107,19 @@
       }
     });
     resetBtn?.addEventListener('click', () => instance.reset());
+  }
+  const fallingStage = document.getElementById('falling-text-stage');
+  if (fallingStage) {
+    mountFallingText(fallingStage, {
+      text: 'Cramming falls apart. Structured notes and custom quizzes stick.',
+      highlightWords: ['Structured', 'custom', 'quizzes', 'stick.'],
+      trigger: 'hover',
+      variant: 'tiles',
+      theme: 'light',
+      accentColor: '#6d5ce8',
+      fontSize: window.innerWidth <= 520 ? '0.95rem' : '1.15rem',
+      restoreDelay: 2.2
+    });
   }
 </script>
 {% endblock %}

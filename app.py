@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, abort
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, abort, Response, stream_with_context
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -285,19 +285,40 @@ def chat():
     history = ChatMessage.query.filter_by(user_id=session["user_id"]).order_by(ChatMessage.created_at.asc()).all()
     return render_template("chat.html", user=current_user(), history=history)
 
+DEMO_TUTOR_ANSWER = (
+    "## Demo tutor mode\n\n"
+    "Gemini is not configured yet. Add `GEMINI_API_KEY` to your `.env` file "
+    "and restart Study Buddy to receive AI-generated explanations.\n\n"
+    "### While you set it up\n"
+    "- Start with the topic's definition.\n"
+    "- Break the concept into smaller steps.\n"
+    "- Work through one example and check your understanding."
+)
+
+TUTOR_SYSTEM_INSTRUCTION = (
+    "You are Study Buddy, a patient academic tutor. Teach clearly, not by dumping information. "
+    "Return clean, readable Markdown. For normal academic questions, begin with a short direct answer, "
+    "then use ## Explanation with numbered steps or concise bullets, ## Example with a practical example, "
+    "and ## Key takeaways with 2-4 short bullets. Adapt this structure: do not force sections for greetings, "
+    "tiny factual questions, or requests needing another format. Use short paragraphs, descriptive headings, "
+    "and tables only when useful. Put code in fenced blocks with a language tag and explain important lines. "
+    "Use LaTeX for all maths, physics, chemistry, and science formulas: wrap inline expressions and Greek letters "
+    "($\\alpha$, $\\beta$, $\\Delta$, $\\theta$, $\\lambda$, $\\sigma$, $\\Omega$) in `$...$`, and wrap multi-term equations "
+    "or reactions in display blocks `$$...$$` instead of plain text. Define technical terms simply. Avoid giant paragraphs, excessive bold, "
+    "repeated conclusions, unnecessary emojis, and filler. Be accurate and admit uncertainty. "
+    "For multi-step problems, provide concise student-friendly explanations without revealing hidden chain-of-thought."
+)
+
+GEMINI_ERROR_ANSWER = (
+    "## I couldn't reach Gemini just now\n\n"
+    "Check `GEMINI_API_KEY`, `GEMINI_MODEL`, your network connection, and API quota, then try again."
+)
+
 def ai_answer(question):
     """Generate a structured, student-friendly answer with Gemini."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return (
-            "## Demo tutor mode\n\n"
-            "Gemini is not configured yet. Add `GEMINI_API_KEY` to your `.env` file "
-            "and restart Study Buddy to receive AI-generated explanations.\n\n"
-            "### While you set it up\n"
-            "- Start with the topic's definition.\n"
-            "- Break the concept into smaller steps.\n"
-            "- Work through one example and check your understanding."
-        )
+        return DEMO_TUTOR_ANSWER
     try:
         from google import genai
         from google.genai import types
@@ -306,28 +327,48 @@ def ai_answer(question):
             model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             contents=question,
             config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are Study Buddy, a patient academic tutor. Teach clearly, not by dumping information. "
-                    "Return clean, readable Markdown. For normal academic questions, begin with a short direct answer, "
-                    "then use ## Explanation with numbered steps or concise bullets, ## Example with a practical example, "
-                    "and ## Key takeaways with 2-4 short bullets. Adapt this structure: do not force sections for greetings, "
-                    "tiny factual questions, or requests needing another format. Use short paragraphs, descriptive headings, "
-                    "and tables only when useful. Put code in fenced blocks with a language tag and explain important lines. "
-                    "Use LaTeX for maths when helpful. Define technical terms simply. Avoid giant paragraphs, excessive bold, "
-                    "repeated conclusions, unnecessary emojis, and filler. Be accurate and admit uncertainty. "
-                    "For multi-step problems, provide concise student-friendly explanations without revealing hidden chain-of-thought."
-                ),
+                system_instruction=TUTOR_SYSTEM_INSTRUCTION,
                 temperature=0.35,
                 max_output_tokens=1600,
             ),
         )
-        answer=response.text
-        if answer and answer.strip(): return answer.strip()
+        answer = response.text
+        if answer and answer.strip():
+            return answer.strip()
         raise RuntimeError("Gemini returned an empty response.")
     except Exception:
         app.logger.exception("Gemini API request failed")
-        return ("## I couldn't reach Gemini just now\n\n"
-                "Check `GEMINI_API_KEY`, `GEMINI_MODEL`, your network connection, and API quota, then try again.")
+        return GEMINI_ERROR_ANSWER
+
+def ai_answer_stream(question):
+    """Yield text chunks for a structured, student-friendly answer with Gemini."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        yield DEMO_TUTOR_ANSWER
+        return
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        emitted = False
+        for chunk in client.models.generate_content_stream(
+            model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+            contents=question,
+            config=types.GenerateContentConfig(
+                system_instruction=TUTOR_SYSTEM_INSTRUCTION,
+                temperature=0.35,
+                max_output_tokens=1600,
+            ),
+        ):
+            text_part = getattr(chunk, "text", None)
+            if text_part:
+                emitted = True
+                yield text_part
+        if not emitted:
+            raise RuntimeError("Gemini stream returned no content.")
+    except Exception:
+        app.logger.exception("Gemini streaming API request failed")
+        yield GEMINI_ERROR_ANSWER
 
 def extract_quiz_topic(message):
     """Detect if a chat message requests a quiz on a specific topic."""
@@ -378,6 +419,56 @@ def api_chat():
     if saved_quiz_id is not None:
         payload["saved_quiz_id"] = saved_quiz_id
     return jsonify(payload)
+
+@app.route("/api/chat/stream", methods=["POST"])
+@login_required
+@rate_limit(30, 60)
+def api_chat_stream():
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("message", "")).strip()
+    if not question:
+        return jsonify({"error": "Please enter a question."}), 400
+    if len(question) > 5000:
+        return jsonify({"error": "Question is too long (maximum 5,000 characters)."}), 400
+    uid = session["user_id"]
+    quiz_topic = extract_quiz_topic(question)
+
+    def generate():
+        chunks = []
+        for chunk in ai_answer_stream(question):
+            chunks.append(chunk)
+            yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+        full_answer = "".join(chunks).strip() or GEMINI_ERROR_ANSWER
+        db.session.add(ChatMessage(user_id=uid, role="user", content=question))
+        db.session.add(ChatMessage(user_id=uid, role="assistant", content=full_answer))
+        saved_quiz_id = None
+        if quiz_topic:
+            try:
+                generated_qs = generate_custom_quiz(quiz_topic)
+                saved = SavedQuiz(
+                    user_id=uid,
+                    topic=quiz_topic,
+                    difficulty="medium",
+                    questions_json=json.dumps(generated_qs),
+                )
+                db.session.add(saved)
+                db.session.flush()
+                saved_quiz_id = saved.id
+            except Exception:
+                app.logger.info("Skipping auto-save for streamed chat quiz topic %r", quiz_topic)
+        db.session.commit()
+        done_payload = {"type": "done"}
+        if quiz_topic:
+            done_payload["quiz_topic"] = quiz_topic
+        if saved_quiz_id is not None:
+            done_payload["saved_quiz_id"] = saved_quiz_id
+        yield f"data: {json.dumps(done_payload)}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 QUIZZES = {
  "Python":[

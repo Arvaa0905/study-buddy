@@ -39,6 +39,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-confirm]').forEach(b => b.addEventListener('click', e => {
     if (!confirm(b.dataset.confirm)) e.preventDefault();
   }));
+  const animatedLists = document.querySelectorAll('[data-animated-list]');
+  if (animatedLists.length) {
+    import('/static/js/animated-list.js')
+      .then(mod => animatedLists.forEach(el => mod.enhanceAnimatedList(el)))
+      .catch(() => {});
+  }
   // Notes editor
   const noteForm = document.getElementById('note-form');
   if (noteForm) {
@@ -64,7 +70,33 @@ document.addEventListener('DOMContentLoaded', () => {
     function scrollBottom(){messages.scrollTop=messages.scrollHeight;}
     function renderMarkdown(target, source) {
       if (window.marked && window.DOMPurify) {
-        target.innerHTML = window.DOMPurify.sanitize(window.marked.parse(source, { breaks: true, gfm: true }));
+        const mathBlocks = [];
+        const escHtml = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        // Protect code blocks first so $ inside code isn't treated as math, then protect LaTeX from marked
+        const codeBlocks = [];
+        let prepared = String(source).replace(/(```[\s\S]*?```|`[^`\n]+`)/g, m => {
+          codeBlocks.push(m);
+          return `@@CODE_${codeBlocks.length - 1}@@`;
+        });
+        prepared = prepared.replace(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<!\\)\$(?!\s)([^\n$]+?)(?<!\s)\$)/g, m => {
+          mathBlocks.push(m);
+          return `@@MATH_${mathBlocks.length - 1}@@`;
+        });
+        prepared = prepared.replace(/@@CODE_(\d+)@@/g, (_, i) => codeBlocks[Number(i)]);
+        let html = window.DOMPurify.sanitize(window.marked.parse(prepared, { breaks: true, gfm: true }));
+        html = html.replace(/@@MATH_(\d+)@@/g, (_, i) => `<span class="math-tex">${escHtml(mathBlocks[Number(i)])}</span>`);
+        target.innerHTML = html;
+        if (window.renderMathInElement) {
+          window.renderMathInElement(target, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '\\[', right: '\\]', display: true },
+              { left: '$', right: '$', display: false },
+              { left: '\\(', right: '\\)', display: false }
+            ],
+            throwOnError: false
+          });
+        }
         target.querySelectorAll('pre code').forEach(block => { if (window.hljs) window.hljs.highlightElement(block); });
         target.querySelectorAll('pre').forEach(pre => {
           const copy=document.createElement('button'); copy.className='code-copy'; copy.type='button'; copy.textContent='Copy';
@@ -73,6 +105,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       } else { target.textContent=source; }
     }
+    let strandsModulePromise = null;
+    function loadStrands() {
+      if (!strandsModulePromise) {
+        strandsModulePromise = import('/static/js/strands.js').catch(() => null);
+      }
+      return strandsModulePromise;
+    }
     function addMessage(role, text, pending=false) {
       const welcome=messages.querySelector('.welcome-message'); if(welcome) welcome.remove();
       const row=document.createElement('div'); row.className=`message ${role==='user'?'user-message':'assistant-message'} message-enter`;
@@ -80,7 +119,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const body=document.createElement('div'); body.className='message-body';
       const who=document.createElement('small'); who.textContent=role==='user'?'You':'Study Buddy';
       const txt=document.createElement('div'); txt.className='message-text';
-      if (pending) { txt.classList.add('thinking-state'); txt.innerHTML='<span></span><span></span><span></span><em>Putting it together…</em>'; }
+      if (pending) {
+        txt.classList.add('thinking-state');
+        txt.innerHTML='<div class="thinking-orb-wrap"><div class="thinking-orb"><span></span><span></span><span></span></div><em>Thinking…</em></div>';
+        const orbEl = txt.querySelector('.thinking-orb');
+        loadStrands().then(mod => {
+          if (mod && txt.classList.contains('thinking-state') && orbEl) {
+            const orb = mod.mountStrands(orbEl, { lightMode: true, listening: true, energy: 0.78 });
+            if (orb) txt._strandsInstance = orb;
+          }
+        });
+      }
       else if (role==='assistant') { txt.classList.add('markdown-body'); renderMarkdown(txt,text); }
       else { txt.textContent=text; }
       body.append(who,txt); row.append(avatar,body); messages.append(row); scrollBottom(); return txt;
@@ -91,16 +140,61 @@ document.addEventListener('DOMContentLoaded', () => {
       const pending=addMessage('assistant','',true);
       const button=chatForm.querySelector('button'); button.disabled=true;
       try {
-        const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({message:text})});
-        const data=await response.json(); pending.classList.remove('thinking-state'); pending.innerHTML=''; renderMarkdown(pending,data.answer||data.error||'Something went wrong.');
-        if (data.quiz_topic) {
-          const launch=document.createElement('a');
-          launch.className='btn btn-primary quiz-launch-btn';
-          launch.href=data.saved_quiz_id ? `/quiz?saved_id=${encodeURIComponent(data.saved_quiz_id)}` : `/quiz?topic=${encodeURIComponent(data.quiz_topic)}`;
-          launch.textContent=`Start custom quiz on ${data.quiz_topic} →`;
-          pending.parentElement.append(launch);
+        const response=await fetch('/api/chat/stream',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
+          body:JSON.stringify({message:text})
+        });
+        const contentType=response.headers.get('content-type')||'';
+        if(!response.ok || contentType.includes('application/json') || !response.body){
+          const data=await response.json().catch(()=>({}));
+          pending._strandsInstance?.destroy();
+          pending.classList.remove('thinking-state'); pending.innerHTML='';
+          renderMarkdown(pending,data.answer||data.error||'Something went wrong.');
+          return;
         }
-      } catch(e){pending.classList.remove('thinking-state'); pending.textContent='Could not connect. Please check your connection and try again.';}
+        const reader=response.body.getReader();
+        const decoder=new TextDecoder();
+        let buffer='', accumulated='', started=false;
+        while(true){
+          const {value, done}=await reader.read();
+          if(done) break;
+          buffer+=decoder.decode(value,{stream:true});
+          const lines=buffer.split('\n\n');
+          buffer=lines.pop()||'';
+          for(const block of lines){
+            const dataLine=block.split('\n').find(l=>l.startsWith('data: '));
+            if(!dataLine) continue;
+            const evt=JSON.parse(dataLine.slice(6));
+            if(evt.type==='chunk' && evt.text){
+              if(!started){
+                started=true;
+                pending._strandsInstance?.destroy();
+                pending.classList.remove('thinking-state');
+                pending.classList.add('markdown-body');
+                pending.innerHTML='';
+              }
+              accumulated+=evt.text;
+              renderMarkdown(pending,accumulated);
+              scrollBottom();
+            } else if(evt.type==='done' && evt.quiz_topic){
+              const launch=document.createElement('a');
+              launch.className='btn btn-primary quiz-launch-btn';
+              launch.href=evt.saved_quiz_id ? `/quiz?saved_id=${encodeURIComponent(evt.saved_quiz_id)}` : `/quiz?topic=${encodeURIComponent(evt.quiz_topic)}`;
+              launch.textContent=`Start custom quiz on ${evt.quiz_topic} →`;
+              pending.parentElement.append(launch);
+            }
+          }
+        }
+        if(!started){
+          pending._strandsInstance?.destroy();
+          pending.classList.remove('thinking-state');
+          pending.textContent='No response received.';
+        }
+      } catch(e){
+        pending._strandsInstance?.destroy();
+        pending.classList.remove('thinking-state'); pending.textContent='Could not connect. Please check your connection and try again.';
+      }
       finally {button.disabled=false; scrollBottom(); input.focus();}
     }
     chatForm.addEventListener('submit',e=>{e.preventDefault();send(input.value);});

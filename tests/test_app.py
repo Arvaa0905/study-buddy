@@ -117,6 +117,18 @@ class StudyBuddyTestCase(unittest.TestCase):
         self.assertEqual(chat_res.status_code, 200)
         self.assertIn("Demo tutor mode", chat_res.get_json()["answer"])
 
+        # Streaming Chat API (SSE)
+        stream_res = self.client.post(
+            "/api/chat/stream",
+            json={"message": "Explain osmosis"},
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(stream_res.status_code, 200)
+        self.assertIn("text/event-stream", stream_res.content_type)
+        stream_body = stream_res.get_data(as_text=True)
+        self.assertIn('"type": "chunk"', stream_body)
+        self.assertIn('"type": "done"', stream_body)
+
         # Quiz API
         quiz_res = self.client.get("/api/quiz/Python")
         self.assertEqual(quiz_res.status_code, 200)

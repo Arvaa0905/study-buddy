@@ -158,3 +158,10 @@ button,a,input,select,textarea{touch-action:manipulation}
   .custom-quiz-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .custom-quiz-controls .btn{grid-column:1 / -1;width:100%;justify-content:center}
 }
+
+@media(max-width:520px){
+  .quiz-launch-btn{white-space:normal;text-align:center;max-width:100%;line-height:1.4}
+}
+
+.markdown-body .katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 0;margin:10px 0;max-width:100%}
+.markdown-body .katex{font-size:1.05em}
