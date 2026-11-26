@@ -56,6 +56,20 @@ class StudyBuddyTestCase(unittest.TestCase):
         self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(resp.headers.get("X-Frame-Options"), "SAMEORIGIN")
 
+    def test_database_url_normalization(self):
+        self.assertEqual(
+            sb.normalize_database_url("postgres://user:pass@db.supabase.co:5432/postgres"),
+            "postgresql+psycopg://user:pass@db.supabase.co:5432/postgres",
+        )
+        self.assertEqual(
+            sb.normalize_database_url("postgresql://user:pass@aws-0.pooler.supabase.com:6543/postgres"),
+            "postgresql+psycopg://user:pass@aws-0.pooler.supabase.com:6543/postgres",
+        )
+        self.assertEqual(
+            sb.normalize_database_url("mysql://user:pass@localhost:3306/studybuddy"),
+            "mysql+pymysql://user:pass@localhost:3306/studybuddy",
+        )
+
     def test_csrf_blocks_missing_token(self):
         resp = self.client.post("/login", data={"email": "a@b.com", "password": "secret"})
         self.assertEqual(resp.status_code, 400)

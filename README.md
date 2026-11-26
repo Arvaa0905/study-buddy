@@ -45,15 +45,22 @@ A full-stack student study portal based on the supplied synopsis: secure account
 - JSON APIs under `/api`; health check at `/health`
 
 ## Run with Docker (recommended for production)
-1. Copy `.env.example` to `.env` and set strong values for `SECRET_KEY`, `MYSQL_PASSWORD`, and `MYSQL_ROOT_PASSWORD`:
+1. Copy `.env.example` to `.env` and set a strong `SECRET_KEY`:
    ```powershell
    Copy-Item .env.example .env
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
-2. Build and start the MySQL database and Gunicorn web service:
-   ```powershell
-   docker compose up -d --build
-   ```
+2. **Persistent Database (Supabase / PostgreSQL)**:
+   - In Supabase, go to **Project Settings → Database → Connection string → URI** (use the **Transaction pooler** port `6543` or **Session pooler** port `5432` for IPv4 compatibility).
+   - Set `DATABASE_URL` in `.env` (for example, `DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=require`).
+   - Build and start the web container:
+     ```powershell
+     docker compose up -d --build
+     ```
+   - *(Optional)* If you prefer a local MySQL container instead of Supabase, leave `DATABASE_URL` unset, set `MYSQL_PASSWORD` / `MYSQL_ROOT_PASSWORD` in `.env`, and run:
+     ```powershell
+     docker compose --profile local-db up -d --build
+     ```
 3. Optional: include the Nginx reverse proxy (`http://localhost`):
    ```powershell
    docker compose --profile proxy up -d --build

@@ -30,16 +30,37 @@ if _secret_key in _WEAK_SECRETS:
     app.logger.warning("Using default SECRET_KEY; set a strong random SECRET_KEY before deploying.")
 
 app.config["SECRET_KEY"] = _secret_key
-db_url = os.getenv("DATABASE_URL", "sqlite:///studybuddy.db")
-if db_url.startswith("mysql://"):
-    db_url = db_url.replace("mysql://", "mysql+pymysql://", 1)
+def normalize_database_url(raw_url):
+    """Normalize MySQL and PostgreSQL/Supabase URLs for SQLAlchemy drivers."""
+    url = (raw_url or "").strip() or "sqlite:///studybuddy.db"
+    if url.startswith("mysql://"):
+        return url.replace("mysql://", "mysql+pymysql://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+db_url = normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///studybuddy.db"))
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 if not db_url.startswith("sqlite"):
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    engine_options = {
         "pool_pre_ping": True,
         "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "280")),
     }
+    if db_url.startswith("postgresql+psycopg://"):
+        connect_args = {}
+        ssl_mode = os.getenv("DB_SSL_MODE")
+        if ssl_mode:
+            connect_args["sslmode"] = ssl_mode
+        elif ("supabase.co" in db_url or "supabase.com" in db_url) and "sslmode=" not in db_url:
+            connect_args["sslmode"] = "require"
+        if ":6543" in db_url or os.getenv("DB_DISABLE_PREPARED_STATEMENTS") == "1":
+            connect_args["prepare_threshold"] = None
+        if connect_args:
+            engine_options["connect_args"] = connect_args
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
