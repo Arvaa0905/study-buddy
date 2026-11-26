@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.quiz_topic) {
           const launch=document.createElement('a');
           launch.className='btn btn-primary quiz-launch-btn';
-          launch.href='/quiz?topic='+encodeURIComponent(data.quiz_topic);
+          launch.href=data.saved_quiz_id ? `/quiz?saved_id=${encodeURIComponent(data.saved_quiz_id)}` : `/quiz?topic=${encodeURIComponent(data.quiz_topic)}`;
           launch.textContent=`Start custom quiz on ${data.quiz_topic} →`;
           pending.parentElement.append(launch);
         }
@@ -81,18 +81,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const picker=document.getElementById('topic-picker');
   if(picker){
     const stage=document.getElementById('quiz-stage'), result=document.getElementById('quiz-result');
-    let topic='', questions=[], answers=[], index=0;
+    let topic='', questions=[], answers=[], index=0, savedQuizId=null;
     const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     async function start(t){
       const r=await fetch('/api/quiz/'+encodeURIComponent(t)); const data=await r.json();
       if(!r.ok){alert(data.error||'Could not load quiz');return;}
-      beginQuiz(data.topic||t, data.questions);
+      beginQuiz(data.topic||t, data.questions, null);
     }
-    function beginQuiz(t, qs){
-      topic=t;questions=qs;answers=Array(questions.length).fill(null);index=0;
+    async function startSaved(id){
+      const r=await fetch('/api/quiz/saved/'+encodeURIComponent(id)); const data=await r.json();
+      if(!r.ok){alert(data.error||'Could not load saved quiz');return;}
+      beginQuiz(data.topic, data.questions, data.id);
+    }
+    function beginQuiz(t, qs, sId=null){
+      topic=t;questions=qs;answers=Array(questions.length).fill(null);index=0;savedQuizId=sId;
       picker.hidden=true;result.hidden=true;stage.hidden=false;
       document.getElementById('quiz-topic').textContent=topic;renderQuestion();
     }
+    document.querySelectorAll('[data-saved-quiz]').forEach(b=>b.addEventListener('click',()=>startSaved(b.dataset.savedQuiz)));
+    document.querySelectorAll('[data-delete-quiz]').forEach(b=>b.addEventListener('click',async(e)=>{
+      e.stopPropagation();
+      if(!confirm('Delete this saved quiz?')) return;
+      const id=b.dataset.deleteQuiz;
+      const r=await fetch(`/api/quiz/saved/${encodeURIComponent(id)}/delete`,{method:'POST',headers:{'X-CSRFToken':csrfToken}});
+      if(r.ok){ document.querySelector(`[data-saved-card="${id}"]`)?.remove(); }
+    }));
     const customForm=document.getElementById('custom-quiz-form');
     if(customForm){
       const topicInput=document.getElementById('custom-topic'),
@@ -104,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanTopic=(reqTopic||'').trim();
         if(!cleanTopic){topicInput.focus();return;}
         genBtn.disabled=true; genBtn.textContent='Generating quiz…';
-        statusEl.hidden=false; statusEl.textContent=`Creating a ${countInput.value}-question ${diffInput.value} quiz on "${cleanTopic}"…`;
+        statusEl.hidden=false; statusEl.textContent=`Creating and saving a ${countInput.value}-question ${diffInput.value} quiz on "${cleanTopic}"…`;
         try{
           const r=await fetch('/api/quiz/generate',{
             method:'POST',
@@ -114,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const data=await r.json();
           if(!r.ok){statusEl.textContent=data.error||'Could not generate quiz.';return;}
           statusEl.hidden=true;
-          beginQuiz(data.topic, data.questions);
+          beginQuiz(data.topic, data.questions, data.id || null);
         }catch(_){
           statusEl.textContent='Could not connect to generate quiz. Please try again.';
         }finally{
@@ -122,8 +135,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       customForm.addEventListener('submit',e=>{e.preventDefault();generateCustomQuiz(topicInput.value);});
-      const requestedTopic=new URLSearchParams(window.location.search).get('topic');
-      if(requestedTopic && requestedTopic.trim()){
+      const params=new URLSearchParams(window.location.search);
+      const requestedSavedId=params.get('saved_id');
+      const requestedTopic=params.get('topic');
+      if(requestedSavedId && /^\d+$/.test(requestedSavedId)){
+        startSaved(requestedSavedId);
+      } else if(requestedTopic && requestedTopic.trim()){
         topicInput.value=requestedTopic.trim();
         generateCustomQuiz(requestedTopic.trim());
       }
@@ -144,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if(answers[index]===null){alert('Choose an answer before finishing.');return;}
       const btn=document.getElementById('submit-quiz');btn.disabled=true;
       try{
-        const r=await fetch('/api/quiz/submit',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({topic,answers})});
+        const r=await fetch('/api/quiz/submit',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify({topic,answers,saved_quiz_id:savedQuizId})});
         const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not save result');
         stage.hidden=true;result.hidden=false;document.getElementById('result-title').textContent=d.percent>=80?'Excellent work!':d.percent>=60?'Good progress!':'Keep going — you’ve got this!';
         document.getElementById('result-score').textContent=`${d.score}/${d.total}`;
@@ -152,6 +169,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('review-list').innerHTML=d.review.map((x,i)=>`<div class="review-item ${x.is_correct?'correct':'incorrect'}"><div class="review-head"><b>${i+1}. ${esc(x.q)}</b><span>${x.is_correct?'✓ Correct':'↻ Review'}</span></div><p>Your answer: ${esc(x.chosen)}</p><p>Correct answer: <b>${esc(x.correct)}</b></p><small>${esc(x.why)}</small></div>`).join('');
       }catch(e){alert(e.message);}finally{btn.disabled=false;}
     });
-    document.getElementById('retry-quiz').addEventListener('click',()=>{result.hidden=true;picker.hidden=false;});
+    document.getElementById('retry-quiz').addEventListener('click',()=>{window.location.href='/quiz';});
   }
 });

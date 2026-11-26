@@ -156,15 +156,43 @@ class StudyBuddyTestCase(unittest.TestCase):
             self.assertEqual(gen_data["topic"], "Photosynthesis")
             self.assertEqual(len(gen_data["questions"]), 3)
             self.assertNotIn("answer", gen_data["questions"][0])
+            saved_id = gen_data["id"]
+
+            # Chat request also auto-saves a custom quiz
+            chat_saved_res = self.client.post(
+                "/api/chat",
+                json={"message": "Quiz me on Cell Respiration"},
+                headers={"X-CSRFToken": token},
+            )
+            self.assertEqual(chat_saved_res.status_code, 200)
+            self.assertIsNotNone(chat_saved_res.get_json().get("saved_quiz_id"))
+
+        # Saved quizzes appear in the Practice Quiz tab
+        quiz_tab = self.client.get("/quiz")
+        self.assertIn(b"Photosynthesis", quiz_tab.data)
+        self.assertIn(b"Cell Respiration", quiz_tab.data)
+
+        # Load saved quiz later and submit it
+        load_res = self.client.get(f"/api/quiz/saved/{saved_id}")
+        self.assertEqual(load_res.status_code, 200)
+        self.assertEqual(load_res.get_json()["topic"], "Photosynthesis")
 
         submit_res = self.client.post(
             "/api/quiz/submit",
-            json={"topic": "Photosynthesis", "answers": [1, 2, 0]},
+            json={"topic": "Photosynthesis", "answers": [1, 2, 0], "saved_quiz_id": saved_id},
             headers={"X-CSRFToken": token},
         )
         self.assertEqual(submit_res.status_code, 200)
         self.assertEqual(submit_res.get_json()["score"], 3)
         self.assertEqual(submit_res.get_json()["percent"], 100)
+
+        # Delete saved quiz
+        del_res = self.client.post(
+            f"/api/quiz/saved/{saved_id}/delete",
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(del_res.status_code, 200)
+        self.assertEqual(self.client.get(f"/api/quiz/saved/{saved_id}").status_code, 404)
 
 
 if __name__ == "__main__":

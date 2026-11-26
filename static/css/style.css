@@ -39,3 +39,9 @@
 .topic-grid-label{margin:18px 0 10px;font-weight:700;letter-spacing:.08em;font-size:10px}
 .quiz-launch-btn{display:inline-flex;margin-top:10px;text-decoration:none}
 @media(max-width:520px){.custom-quiz-controls .btn{margin-left:0;width:100%;justify-content:center}}
+.saved-quiz-card{display:flex;flex-direction:column;cursor:default}
+.saved-quiz-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.saved-quiz-delete{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
+.saved-quiz-delete:hover{background:#f5f2ff;color:#b94a48}
+.saved-quiz-start{background:none;border:none;padding:0;font:inherit;text-align:left;cursor:pointer;margin-top:auto}
+.saved-quiz-empty{grid-column:1 / -1;padding:18px 20px}

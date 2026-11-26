@@ -83,6 +83,17 @@ class QuizResult(db.Model):
     total = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class SavedQuiz(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    topic = db.Column(db.String(120), nullable=False)
+    difficulty = db.Column(db.String(20), nullable=False, default="medium")
+    questions_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def questions(self):
+        return json.loads(self.questions_json)
+
 _rate_lock = threading.Lock()
 _rate_buckets = defaultdict(list)
 
@@ -322,10 +333,27 @@ def api_chat():
     answer = ai_answer(question)
     db.session.add(ChatMessage(user_id=uid, role="user", content=question))
     db.session.add(ChatMessage(user_id=uid, role="assistant", content=answer))
+    saved_quiz_id = None
+    if quiz_topic:
+        try:
+            generated_qs = generate_custom_quiz(quiz_topic)
+            saved = SavedQuiz(
+                user_id=uid,
+                topic=quiz_topic,
+                difficulty="medium",
+                questions_json=json.dumps(generated_qs),
+            )
+            db.session.add(saved)
+            db.session.flush()
+            saved_quiz_id = saved.id
+        except Exception:
+            app.logger.info("Skipping auto-save for chat quiz topic %r", quiz_topic)
     db.session.commit()
     payload = {"answer": answer}
     if quiz_topic:
         payload["quiz_topic"] = quiz_topic
+    if saved_quiz_id is not None:
+        payload["saved_quiz_id"] = saved_quiz_id
     return jsonify(payload)
 
 QUIZZES = {
@@ -417,7 +445,27 @@ def generate_custom_quiz(topic, num_questions=5, difficulty="medium"):
 @app.route("/quiz")
 @login_required
 def quiz():
-    return render_template("quiz.html", user=current_user(), topics=list(QUIZZES.keys()))
+    saved = (
+        SavedQuiz.query.filter_by(user_id=session["user_id"])
+        .order_by(SavedQuiz.created_at.desc())
+        .all()
+    )
+    saved_quizzes = [
+        {
+            "id": sq.id,
+            "topic": sq.topic,
+            "difficulty": sq.difficulty,
+            "count": len(sq.questions()),
+            "created_at": sq.created_at,
+        }
+        for sq in saved
+    ]
+    return render_template(
+        "quiz.html",
+        user=current_user(),
+        topics=list(QUIZZES.keys()),
+        saved_quizzes=saved_quizzes,
+    )
 
 @app.route("/api/quiz/generate", methods=["POST"])
 @login_required
@@ -444,9 +492,40 @@ def quiz_generate():
         app.logger.exception("Custom quiz generation failed")
         return jsonify({"error": "Could not generate quiz right now. Please try again."}), 502
 
-    session["active_quiz"] = {"topic": topic, "questions": questions}
+    saved = SavedQuiz(
+        user_id=session["user_id"],
+        topic=topic,
+        difficulty=difficulty,
+        questions_json=json.dumps(questions),
+    )
+    db.session.add(saved)
+    db.session.commit()
+
+    session["active_quiz"] = {"id": saved.id, "topic": topic, "questions": questions}
     public_questions = [{"q": q["q"], "options": q["options"]} for q in questions]
-    return jsonify({"topic": topic, "questions": public_questions})
+    return jsonify({
+        "id": saved.id,
+        "topic": topic,
+        "difficulty": difficulty,
+        "questions": public_questions,
+    })
+
+@app.route("/api/quiz/saved/<int:quiz_id>")
+@login_required
+def get_saved_quiz(quiz_id):
+    saved = SavedQuiz.query.filter_by(id=quiz_id, user_id=session["user_id"]).first_or_404()
+    questions = saved.questions()
+    session["active_quiz"] = {"id": saved.id, "topic": saved.topic, "questions": questions}
+    public_questions = [{"q": q["q"], "options": q["options"]} for q in questions]
+    return jsonify({"id": saved.id, "topic": saved.topic, "questions": public_questions})
+
+@app.route("/api/quiz/saved/<int:quiz_id>/delete", methods=["POST"])
+@login_required
+def delete_saved_quiz(quiz_id):
+    saved = SavedQuiz.query.filter_by(id=quiz_id, user_id=session["user_id"]).first_or_404()
+    db.session.delete(saved)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 @app.route("/api/quiz/<topic>")
 @login_required
@@ -461,9 +540,16 @@ def quiz_submit():
     data = request.get_json(silent=True) or {}
     topic = str(data.get("topic") or "").strip()
     answers = data.get("answers",[])
+    saved_quiz_id = data.get("saved_quiz_id")
     active = session.get("active_quiz")
     if isinstance(active, dict) and active.get("topic") == topic and isinstance(active.get("questions"), list):
         qs = active["questions"]
+    elif isinstance(saved_quiz_id, int):
+        saved = SavedQuiz.query.filter_by(id=saved_quiz_id, user_id=session["user_id"]).first()
+        if not saved:
+            return jsonify({"error": "Invalid quiz submission."}), 400
+        qs = saved.questions()
+        topic = saved.topic
     elif topic in QUIZZES:
         qs = QUIZZES[topic]
     else:
