@@ -56,6 +56,19 @@ class StudyBuddyTestCase(unittest.TestCase):
         self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(resp.headers.get("X-Frame-Options"), "SAMEORIGIN")
 
+    def test_landing_and_auth_pages(self):
+        landing = self.client.get("/")
+        self.assertEqual(landing.status_code, 200)
+        self.assertIn(b"paper-crumple-stage", landing.data)
+
+        login_page = self.client.get("/login")
+        self.assertEqual(login_page.status_code, 200)
+        self.assertIn(b"data-pw-toggle", login_page.data)
+
+        signup_page = self.client.get("/signup")
+        self.assertEqual(signup_page.status_code, 200)
+        self.assertIn(b"pw-strength", signup_page.data)
+
     def test_database_url_normalization(self):
         self.assertEqual(
             sb.normalize_database_url("postgres://user:pass@db.supabase.co:5432/postgres"),

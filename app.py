@@ -190,7 +190,9 @@ def current_user():
 
 @app.route("/")
 def index():
-    return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
+    if session.get("user_id"):
+        return redirect(url_for("dashboard"))
+    return render_template("landing.html")
 
 @app.route("/signup", methods=["GET","POST"])
 @rate_limit(10, 60)

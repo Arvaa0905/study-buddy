@@ -1,11 +1,71 @@
 {% extends "base.html" %}{% block title %}{{ 'Create account' if mode=='signup' else 'Sign in' }} · Study Buddy{% endblock %}
-{% block content %}<div class="auth-shell"><div class="auth-brand"><span class="brand-icon">✦</span> Study Buddy</div><div class="auth-card">
-<div class="eyebrow">YOUR PERSONAL LEARNING SPACE</div><h1>{{ 'Create your account' if mode=='signup' else 'Welcome back' }}</h1><p class="muted">{{ 'Build better study habits, one session at a time.' if mode=='signup' else 'Pick up where your learning left off.' }}</p>
-<form method="post" class="form-stack">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-{% if mode=='signup' %}<label>Full name<input name="name" placeholder="Your name" required maxlength="80" autocomplete="name"></label>{% endif %}
-<label>Email address<input type="email" name="email" placeholder="you@example.com" required autocomplete="email"></label>
-<label>Password<input type="password" name="password" placeholder="{{ 'At least 8 characters' if mode=='signup' else 'Your password' }}" minlength="{{ 8 if mode=='signup' else 1 }}" required autocomplete="{{ 'new-password' if mode=='signup' else 'current-password' }}"></label>
-<button class="btn btn-primary full" type="submit">{{ 'Create account' if mode=='signup' else 'Sign in' }} <span>→</span></button></form>
-<div class="auth-switch">{% if mode=='signup' %}Already have an account? <a href="{{ url_for('login') }}">Sign in</a>{% else %}New to Study Buddy? <a href="{{ url_for('signup') }}">Create an account</a>{% endif %}</div>
-</div><p class="auth-foot">A calmer way to learn. Your notes and progress stay in your account.</p></div>{% endblock %}
+{% block content %}
+<div class="auth-split">
+  <aside class="auth-showcase">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-icon">✦</span> Study Buddy</a>
+    <div class="showcase-body">
+      <span class="pill">PERSONAL STUDY PORTAL</span>
+      <h2>Study smarter, with less clutter.</h2>
+      <p class="muted">Your notes, AI tutor conversations, and custom quizzes stay organized in one calm workspace.</p>
+      <ul class="showcase-list">
+        <li><span class="showcase-dot lav">✧</span><span>Structured AI tutoring on any subject</span></li>
+        <li><span class="showcase-dot peach">▤</span><span>Fast, searchable personal notes</span></li>
+        <li><span class="showcase-dot mint">✓</span><span>Saved custom quizzes &amp; score history</span></li>
+      </ul>
+    </div>
+    <a class="showcase-back" href="{{ url_for('index') }}">← Back to overview</a>
+  </aside>
+
+  <div class="auth-shell">
+    <div class="auth-brand-mobile">
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-icon">✦</span> Study Buddy</a>
+    </div>
+    <div class="auth-card auth-enter">
+      <div class="auth-tabs" role="tablist">
+        <a href="{{ url_for('login') }}" class="auth-tab {{ 'active' if mode!='signup' else '' }}">Sign in</a>
+        <a href="{{ url_for('signup') }}" class="auth-tab {{ 'active' if mode=='signup' else '' }}">Create account</a>
+      </div>
+
+      <div class="eyebrow">{{ 'GET STARTED' if mode=='signup' else 'WELCOME BACK' }}</div>
+      <h1>{{ 'Create your account' if mode=='signup' else 'Sign in to continue' }}</h1>
+      <p class="muted">{{ 'Build better study habits, one session at a time.' if mode=='signup' else 'Pick up where your learning left off.' }}</p>
+
+      <form method="post" class="form-stack" id="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if mode=='signup' %}
+        <label class="field-group">
+          <span>Full name</span>
+          <input name="name" placeholder="Your name" required maxlength="80" autocomplete="name">
+        </label>
+        {% endif %}
+        <label class="field-group">
+          <span>Email address</span>
+          <input type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+        </label>
+        <label class="field-group">
+          <span>Password</span>
+          <div class="pw-wrap">
+            <input id="auth-password" type="password" name="password" placeholder="{{ 'At least 8 characters' if mode=='signup' else 'Your password' }}" minlength="{{ 8 if mode=='signup' else 1 }}" required autocomplete="{{ 'new-password' if mode=='signup' else 'current-password' }}">
+            <button type="button" class="pw-toggle" aria-label="Show password" data-pw-toggle>Show</button>
+          </div>
+        </label>
+        {% if mode=='signup' %}
+        <div class="pw-strength" id="pw-strength" hidden>
+          <div class="pw-bars"><span></span><span></span><span></span><span></span></div>
+          <small id="pw-strength-label" class="muted">Use at least 8 characters</small>
+        </div>
+        {% endif %}
+        <button class="btn btn-primary full auth-submit" type="submit" data-loading-text="{{ 'Creating account…' if mode=='signup' else 'Signing in…' }}">
+          <span>{{ 'Create account' if mode=='signup' else 'Sign in' }}</span>
+          <span class="btn-arrow">→</span>
+        </button>
+      </form>
+
+      <div class="auth-switch">
+        {% if mode=='signup' %}Already have an account? <a href="{{ url_for('login') }}">Sign in</a>{% else %}New to Study Buddy? <a href="{{ url_for('signup') }}">Create an account</a>{% endif %}
+      </div>
+    </div>
+    <p class="auth-foot">A calmer way to learn. Your notes and progress stay in your account.</p>
+  </div>
+</div>
+{% endblock %}

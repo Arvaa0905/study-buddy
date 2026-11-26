@@ -1,5 +1,41 @@
 document.addEventListener('DOMContentLoaded', () => {
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  document.querySelectorAll('[data-pw-toggle]').forEach(btn => btn.addEventListener('click', () => {
+    const input = btn.previousElementSibling;
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? 'Hide' : 'Show';
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  }));
+  const authForm = document.getElementById('auth-form');
+  if (authForm) {
+    const pwInput = document.getElementById('auth-password');
+    const meter = document.getElementById('pw-strength');
+    const meterLabel = document.getElementById('pw-strength-label');
+    if (pwInput && meter && meterLabel) {
+      pwInput.addEventListener('input', () => {
+        const val = pwInput.value;
+        meter.hidden = val.length === 0;
+        let score = 0;
+        if (val.length >= 8) score++;
+        if (/[A-Z]/.test(val) && /[a-z]/.test(val)) score++;
+        if (/\d/.test(val)) score++;
+        if (/[^A-Za-z0-9]/.test(val)) score++;
+        meter.dataset.score = String(score);
+        const labels = ['Too short (min 8 chars)', 'Fair password', 'Good password', 'Strong password', 'Very strong password'];
+        meterLabel.textContent = val.length < 8 ? labels[0] : labels[Math.max(1, score)];
+      });
+    }
+    authForm.addEventListener('submit', () => {
+      const btn = authForm.querySelector('.auth-submit');
+      if (btn && !btn.disabled) {
+        btn.disabled = true;
+        const label = btn.querySelector('span');
+        if (label && btn.dataset.loadingText) label.textContent = btn.dataset.loadingText;
+      }
+    });
+  }
   document.querySelectorAll('[data-confirm]').forEach(b => b.addEventListener('click', e => {
     if (!confirm(b.dataset.confirm)) e.preventDefault();
   }));

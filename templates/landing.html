@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Study Buddy — A calmer way to learn{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/paper-crumple.css') }}">
+<div class="landing-page">
+  <header class="landing-nav">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-icon">✦</span> Study Buddy</a>
+    <nav class="landing-nav-links">
+      <a href="#features" class="nav-text-link">Features</a>
+      <a href="{{ url_for('login') }}" class="btn btn-ghost">Sign in</a>
+      <a href="{{ url_for('signup') }}" class="btn btn-primary">Get started <span>→</span></a>
+    </nav>
+  </header>
+
+  <section class="landing-hero">
+    <div class="hero-copy">
+      <span class="pill hero-pill">✦ YOUR PERSONAL STUDY WORKSPACE</span>
+      <h1>Toss the messy paper.<br>Keep what actually sticks.</h1>
+      <p class="hero-sub">
+        Ask an AI tutor for clear step-by-step explanations, organize your notes in seconds, and generate custom practice quizzes on any topic.
+      </p>
+      <div class="hero-actions">
+        <a href="{{ url_for('signup') }}" class="btn btn-primary btn-lg">Start studying free <span class="btn-arrow">→</span></a>
+        <a href="{{ url_for('login') }}" class="btn btn-ghost btn-lg">Sign in</a>
+      </div>
+      <div class="hero-meta">
+        <span>✓ Free student workspace</span>
+        <span>✓ AI-generated custom quizzes</span>
+        <span>✓ Private notes &amp; history</span>
+      </div>
+    </div>
+
+    <div class="hero-stage panel">
+      <div class="stage-topbar">
+        <span class="pill">HOLD &amp; DRAG TO CRUMPLE</span>
+        <div class="stage-controls">
+          <span id="paper-state-pill" class="stage-state-pill">Flat</span>
+          <button id="paper-reset-btn" type="button" class="stage-reset-btn">Reset</button>
+        </div>
+      </div>
+      <div id="paper-crumple-stage" class="paper-crumple-stage"></div>
+    </div>
+  </section>
+
+  <section id="features" class="landing-features">
+    <div class="landing-section-head">
+      <span class="eyebrow">BUILT FOR FOCUS</span>
+      <h2>Everything you need for a calmer study session</h2>
+    </div>
+    <div class="tool-grid landing-grid">
+      <div class="tool-card feature-card">
+        <div class="tool-art art-purple">✧</div>
+        <span class="pill">AI TUTOR</span>
+        <h3>Step-by-step clarity</h3>
+        <p>Get structured explanations with examples, code blocks, and math formatting—never walls of text.</p>
+      </div>
+      <div class="tool-card feature-card">
+        <div class="tool-art art-peach">▤</div>
+        <span class="pill">SMART NOTES</span>
+        <h3>Searchable knowledge</h3>
+        <p>Capture key ideas by subject and find any definition or formula in seconds.</p>
+      </div>
+      <div class="tool-card feature-card">
+        <div class="tool-art art-mint">✓</div>
+        <span class="pill">CUSTOM QUIZZES</span>
+        <h3>Practice on any topic</h3>
+        <p>Request a quiz in chat or pick any subject—saved automatically so you can retake it anytime.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="landing-footer">
+    <span class="muted small">Study Buddy · A calmer way to learn.</span>
+    <div class="landing-footer-links">
+      <a href="{{ url_for('login') }}">Sign in</a>
+      <a href="{{ url_for('signup') }}">Create account</a>
+    </div>
+  </footer>
+</div>
+
+<script type="module">
+  import { mountPaperCrumple } from "{{ url_for('static', filename='js/paper-crumple.js') }}";
+  const stage = document.getElementById('paper-crumple-stage');
+  const statePill = document.getElementById('paper-state-pill');
+  const resetBtn = document.getElementById('paper-reset-btn');
+  if (stage) {
+    const labels = { flat: 'Flat', holding: 'Holding…', crumpled: 'Crumpled', creased: 'Creased' };
+    const instance = mountPaperCrumple(stage, {
+      sceneHeight: 420,
+      width: 280,
+      height: 350,
+      releaseBehavior: 'creased',
+      creaseStrength: 0.22,
+      onStateChange: (next) => {
+        if (statePill) statePill.textContent = labels[next] || next;
+      }
+    });
+    resetBtn?.addEventListener('click', () => instance.reset());
+  }
+</script>
+{% endblock %}
+
